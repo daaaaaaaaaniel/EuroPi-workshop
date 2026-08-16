@@ -59,6 +59,7 @@ EUROPI_SCRIPTS = OrderedDict([
     ["Logic",             "contrib.logic.Logic"],
     ["Lutra",             "contrib.lutra.Lutra"],
     ["MasterClock",       "contrib.master_clock.MasterClock"],
+    ["MIDI to CV",        "contrib.midi2cv.Midi2CV"],
     ["Morse",             "contrib.morse.Morse"],
     ["NoddyHolder",       "contrib.noddy_holder.NoddyHolder"],
     ["Ocean Surge",       "contrib.ocean_surge.OceanSurge"],

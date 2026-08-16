@@ -157,12 +157,23 @@ port reselected. Testing it is a large part of what phase 1 is for.
 
 # Deploying
 
-The vendored USB package lives at `software/firmware/experimental/usb/`, which is a nested
-package. `scripts/deploy_firmware.rshell` copies `experimental/*.py` without recursing, so
-**it does not deploy this package**. The same gap already affects `experimental/clocks/`
-and `experimental/fonts/`.
+**Deploy the whole firmware from source, not just this script.** On a stock release `.uf2`
+the firmware is frozen into the image, and `/lib` shadows a frozen package *wholesale*
+rather than merging with it — so dropping a lone `experimental/usb/` into `/lib` would
+hide the frozen `experimental` package entirely and take `experimental_config` and `wifi`
+with it. `europi.py:41-42` imports both at boot, for every script, so the module would stop
+booting.
 
-Until the deploy script is fixed, copy the package to the module by hand — with `mpremote`:
+The supported route is the project's own deploy target, which copies the full firmware and
+contrib tree into `/lib`:
+
+```sh
+make deploy_firmware
+```
+
+That leaves one gap. `scripts/deploy_firmware.rshell` copies `experimental/*.py` without
+recursing, so it **does not deploy the nested `experimental/usb/` package** — the same gap
+that already affects `experimental/clocks/` and `experimental/fonts/`. Add it afterwards:
 
 ```sh
 mpremote mkdir :/lib/experimental/usb
@@ -171,7 +182,20 @@ mpremote cp software/firmware/experimental/usb/__init__.py :/lib/experimental/us
 mpremote cp software/firmware/experimental/usb/device/*.py :/lib/experimental/usb/device/
 ```
 
-If the package is missing, the display shows `no usb package` instead of the link state.
+If the package is missing, the display shows `no usb package` instead of the link state,
+which is a clean failure rather than a broken boot.
+
+Two caveats worth knowing before you start:
+
+- **You cannot bring this up by deploying it as `/main.py`.** The release firmware freezes
+  its own `main.py`, and a frozen `main.py` autostarts in preference to one in `/`. Launch
+  it from the menu instead.
+- **Import priority is worth confirming on your own module.** This project's
+  `create_custom_firmware_uf2.md` states that `/` and `/lib` are searched before frozen
+  modules, whereas upstream MicroPython's default `sys.path` puts `.frozen` ahead of
+  `/lib`. The deploy workflow above assumes the project's version is right for this port.
+  If it is not, `make deploy_firmware` would have no effect at all and the frozen firmware
+  would keep running — so if your changes appear to do nothing, check this first.
 
 # Bring-up checklist
 

@@ -13,7 +13,7 @@
 # limitations under the License.
 from europi import *
 from europi_script import EuroPiScript
-from time import ticks_diff, ticks_ms
+from time import ticks_add, ticks_diff, ticks_ms
 
 try:
     from experimental.usb.device import get as usb_device_get
@@ -137,7 +137,9 @@ class Midi2CV(EuroPiScript):
 
         self.panic_requested = False
         self.display_dirty = True
-        self.display_at = ticks_ms()
+        # Backdated so the first frame draws immediately rather than leaving whatever
+        # the menu left on screen for the length of one refresh interval
+        self.display_at = ticks_add(ticks_ms(), -DISPLAY_INTERVAL_MS)
         self.host_connected = False
 
         # Buttons are serviced from the main loop rather than acted on here: these run
