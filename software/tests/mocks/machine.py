@@ -83,3 +83,42 @@ class mem:
 
 
 mem32 = mem()
+
+
+class _BuiltinUSBDriver:
+    """Stands in for one of machine.USBDevice's BUILTIN_ descriptors.
+
+    usb/device/core.py unpacks desc_dev with struct format "<BBHBBBBHHHBBBB" (18 bytes)
+    and indexes desc_cfg[8], so these cannot be None.
+    """
+
+    desc_dev = bytes(18)
+    desc_cfg = bytes(9)
+    itf_max = 0
+    ep_max = 0
+    str_max = 0
+
+
+class USBDevice:
+    """Mock of machine.USBDevice, enough for usb/device/core.py to be constructed."""
+
+    BUILTIN_NONE = _BuiltinUSBDriver()
+    BUILTIN_DEFAULT = _BuiltinUSBDriver()
+
+    def __init__(self, *args):
+        self.builtin_driver = self.BUILTIN_NONE
+        self._active = False
+
+    def config(self, *args, **kwargs):
+        pass
+
+    def active(self, *optional_value):
+        if optional_value:
+            self._active = bool(optional_value[0])
+        return self._active
+
+    def submit_xfer(self, *args):
+        pass
+
+    def stall(self, *args):
+        pass
