@@ -160,16 +160,48 @@ def test_all_notes_off_clears_a_stuck_gate(midi2cv, script):
 # ----------------------------------------------------------------------------------
 
 
-def test_note_on_dips_the_gate_then_raises_it(midi2cv, script):
+def test_the_first_note_of_a_phrase_attacks_immediately(script):
+    """There is nothing to retrigger when the gate is already low.
+
+    Dipping it anyway would delay the first note of every phrase by the dip length.
+    """
     script.handle_note_on(60, 100)
+    assert is_high(gate_cv())
+    assert script.gate_raise_at[0] is None, "no dip should have been scheduled"
+
+
+def test_note_on_over_a_held_note_dips_the_gate_then_raises_it(midi2cv, script):
+    script.handle_note_on(60, 100)
+    script.handle_note_on(64, 100)
     assert not is_high(gate_cv()), "gate should drop for the retrigger dip"
 
     script.service_timers(utime.ticks_add(utime.ticks_ms(), midi2cv.GATE_RETRIGGER_MS + 1))
     assert is_high(gate_cv())
 
 
+def test_notes_faster_than_the_dip_do_not_hold_the_gate_low(midi2cv, script):
+    """A dip already in progress finishes rather than restarting.
+
+    Restarting it on every note-on lets a fast run of notes pin the gate low for as
+    long as the run lasts.
+    """
+    now = utime.ticks_ms()
+    script.handle_note_on(60, 100)
+
+    elapsed = 0
+    for step in range(6):
+        elapsed += 1  # a note every 1ms, well inside the dip
+        script.service_timers(utime.ticks_add(now, elapsed))
+        script.handle_note_on(61 + step, 100)
+
+    script.service_timers(utime.ticks_add(now, elapsed + midi2cv.GATE_RETRIGGER_MS + 1))
+    assert is_high(gate_cv()), "gate should have recovered despite the run of notes"
+
+
 def test_a_note_released_during_the_dip_leaves_the_gate_low(midi2cv, script):
     script.handle_note_on(60, 100)
+    script.handle_note_on(64, 100)  # this one dips the gate
+    script.handle_note_off(64)
     script.handle_note_off(60)
     script.service_timers(utime.ticks_add(utime.ticks_ms(), midi2cv.GATE_RETRIGGER_MS + 1))
     assert not is_high(gate_cv())

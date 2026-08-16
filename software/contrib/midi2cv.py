@@ -191,7 +191,10 @@ class UsbMidiTransport(MIDIInterface):
     """
 
     def __init__(self, on_event):
-        super().__init__()
+        # The library defaults to a 16-byte receive buffer, which is only four MIDI
+        # events. Clock alone is 48 events a second at 120bpm, and a pitch bend sweep
+        # sends a dense stream on top of that, so give it more room.
+        super().__init__(rxlen=64)
         self._on_event = on_event
 
     def on_midi_event(self, cin, midi0, midi1, midi2):
@@ -225,6 +228,9 @@ class Midi2CV(EuroPiScript):
         # Pending output timings, one slot per output. None means nothing pending.
         self.pulse_off_at = [None] * len(cvs)
         self.gate_raise_at = [None] * len(cvs)
+
+        # Gate outputs are PWM, so there is no pin to read back -- track them
+        self.gate_is_high = [False] * len(cvs)
 
         self.panic_requested = False
         self.display_dirty = True
@@ -354,16 +360,33 @@ class Midi2CV(EuroPiScript):
         # Poly key pressure and program change are consumed without acting: poly
         # pressure is per-note and would need associating with a sounding note.
 
+    def set_gate(self, index, cv, high):
+        self.gate_is_high[index] = high
+        if high:
+            cv.voltage(self.gate_voltage)
+        else:
+            cv.off()
+
     def handle_note_on(self, note, velocity):
         self.notes.note_on(note, velocity)
         self.last_note = note
         self.last_velocity = velocity
 
-        # Phase 1 dips the gate on every note-on, full stop. Phase 2 makes this
+        # Phase 1 retriggers on every note-on, full stop. Phase 2 makes this
         # conditional on the note actually changing what the output selected.
         now = ticks_ms()
         for index, cv in self.gate_outs:
-            cv.off()
+            if self.gate_raise_at[index] is not None:
+                # Already dipping from an earlier note-on. Letting that dip finish
+                # rather than restarting it is what stops a fast run of notes from
+                # holding the gate low indefinitely.
+                continue
+            if not self.gate_is_high[index]:
+                # Nothing to retrigger, so attack immediately. Dipping a gate that is
+                # already low would only delay the first note of every phrase.
+                self.set_gate(index, cv, True)
+                continue
+            self.set_gate(index, cv, False)
             self.gate_raise_at[index] = ticks_add(now, GATE_RETRIGGER_MS)
 
         self.update_note_outputs()
@@ -372,13 +395,16 @@ class Midi2CV(EuroPiScript):
     def handle_note_off(self, note):
         self.notes.note_off(note)
         if self.notes.current() is None:
-            for index, cv in self.gate_outs:
-                cv.off()
-                self.gate_raise_at[index] = None
+            self.drop_gates()
         else:
             # Fall back to another held note, moving pitch without re-attacking
             self.update_note_outputs()
         self.display_dirty = True
+
+    def drop_gates(self):
+        for index, cv in self.gate_outs:
+            self.set_gate(index, cv, False)
+            self.gate_raise_at[index] = None
 
     def update_note_outputs(self):
         """Point pitch and velocity outputs at the selected note.
@@ -390,13 +416,16 @@ class Midi2CV(EuroPiScript):
         if note is None:
             return
 
-        pitch_voltage = self.note_to_voltage(note)
-        for index, cv in self.pitch_outs:
-            cv.voltage(pitch_voltage)
+        self.update_pitch_outputs(note)
 
         velocity_voltage = self.notes.velocity_of(note) / MAX_MIDI_VALUE * self.max_voltage
         for index, cv in self.velocity_outs:
             cv.voltage(velocity_voltage)
+
+    def update_pitch_outputs(self, note):
+        pitch_voltage = self.note_to_voltage(note)
+        for index, cv in self.pitch_outs:
+            cv.voltage(pitch_voltage)
 
     def note_to_voltage(self, note):
         """1V per octave from BASE_NOTE, with pitch bend folded in.
@@ -411,9 +440,7 @@ class Midi2CV(EuroPiScript):
         if controller == CC_ALL_NOTES_OFF or controller == CC_ALL_SOUND_OFF:
             # The host's own way of clearing a stuck gate
             self.notes.clear()
-            for index, cv in self.gate_outs:
-                cv.off()
-                self.gate_raise_at[index] = None
+            self.drop_gates()
             self.display_dirty = True
             return
 
@@ -435,7 +462,11 @@ class Midi2CV(EuroPiScript):
         if PITCH_BEND_SEMITONES == 0:
             return
         self.bend_semitones = (value - BEND_CENTRE) / BEND_CENTRE * PITCH_BEND_SEMITONES
-        self.update_note_outputs()
+        # Only pitch moves with bend. A bend sweep is a dense stream of messages, so
+        # rewriting the velocity outputs on every one of them is wasted work.
+        note = self.notes.current()
+        if note is not None:
+            self.update_pitch_outputs(note)
         self.display_dirty = True
 
     def handle_realtime(self, status):
@@ -487,6 +518,7 @@ class Midi2CV(EuroPiScript):
         for index in range(len(cvs)):
             self.pulse_off_at[index] = None
             self.gate_raise_at[index] = None
+            self.gate_is_high[index] = False
         turn_off_all_cvs()
 
         self.display_dirty = True
@@ -505,7 +537,7 @@ class Midi2CV(EuroPiScript):
                 self.gate_raise_at[index] = None
                 # The note may have been released during the dip
                 if self.notes.current() is not None:
-                    cv.voltage(self.gate_voltage)
+                    self.set_gate(index, cv, True)
 
     def update_display(self, now):
         connected = self.is_connected()

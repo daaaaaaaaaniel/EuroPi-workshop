@@ -146,6 +146,23 @@ Raising `BASE_NOTE` shifts the window up: every note below it clamps to 0V and t
 becomes unreachable. At 36, for instance, the bottom fifteen notes of a piano all produce 0V and
 nothing above 7.58V is ever output.
 
+### How the gate retriggers
+
+The gate is high while any note is held. When a note-on arrives while the gate is already
+high, the gate drops for `GATE_RETRIGGER_MS` before rising again, so envelope generators
+see a distinct new note instead of one long sustain. This is what keeps a legato line
+playable.
+
+Two details matter in practice:
+
+- **The first note of a phrase attacks immediately.** If the gate is already low there is
+  nothing to retrigger, so it rises at once rather than waiting out a dip.
+- **A dip already in progress is allowed to finish.** Notes arriving faster than the dip
+  length do not restart it, so a fast run cannot pin the gate low for the length of the run.
+
+If your envelopes miss retriggers, raise `GATE_RETRIGGER_MS`. Winterbloom's Sol, a
+commercial USB MIDI to CV module, uses 15ms for the same job.
+
 ### Sustain pedal
 
 There is no special sustain handling. CC 64 is an ordinary CC, so setting `CC_NUMBER = 64` gives you
@@ -185,6 +202,14 @@ Some things worth knowing:
 - **VID and PID are left as MicroPython's.** USB vendor IDs are assigned by USB-IF and cost money.
   The serial number falls back to the Pico's flash unique ID, so two modules with identical names
   are still distinguishable.
+
+## Getting your host to send clock
+
+Sending notes and sending clock are often separate switches in a DAW, and the clock one is
+easy to miss. In **Ableton Live**, `Preferences > MIDI` has a *Track* and a *Sync* toggle
+per output — without *Sync* enabled, Live sends no MIDI clock at all, and the `clock` and
+`transport` outputs stay silent while notes work perfectly. Most DAWs have an equivalent
+setting.
 
 ## EuroPi is a MIDI device, not a MIDI host
 
@@ -226,6 +251,11 @@ full licence text.
 The note-to-voltage mapping and the gate retrigger technique follow
 [Europi_BLE_MIDI](https://github.com/cob333/Europi_BLE_MIDI), a BLE MIDI firmware for EuroPi
 written in C.
+
+The retrigger behaviour — attacking immediately when the gate is already low, and letting a
+dip in progress finish — follows [Winterbloom Sol](https://github.com/wntrblm/Sol), a
+CircuitPython USB MIDI to CV module. Its default output map is also close to the one used
+here.
 
 # Roadmap
 
