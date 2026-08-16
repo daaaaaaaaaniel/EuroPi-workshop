@@ -478,7 +478,6 @@ next sample.
 | `binary_counter.py` | Each gate increments the 6-bit counter |
 | `bit_garden.py` | Trigger/gate source that the outputs mirror |
 | `clock_mod.py` | The clock being multiplied/divided |
-| `consequencer.py` | Clock starts and advances the sequence |
 | `cvecorder.py` | 50% duty-cycle gate; drives recording and the 32-step loop |
 | `daily_random.py` | External clock; all other controls are unused |
 | `dfam.py` | External clock, passed through `cv1` to the DFAM's ADV/CLOCK |
@@ -519,6 +518,7 @@ which call the same `advance()` method as the `din` handler.
 | Script | How to free it |
 |--------|----------------|
 | `coin_toss.py` | `b1` toggles to internal clock |
+| `consequencer.py` | Long-press `b1` (>3s) toggles to the internal clock; tempo from `INTERNAL_BPM` |
 | `egressus_melodiam.py` | Long-press `b2` for `unClockedMode` |
 | `envelope_generator.py` | `LOOPING_MODE_LOOP` self-retriggers; the default is once |
 | `pet_rock.py` | `k1`/`k2` run internal clocks; fully anticlockwise stops them |
@@ -546,7 +546,7 @@ module can supply both the gate and the pitch/timbre CV for a voice.
 | `hamlet.py` | `out1`/`out2` triggers, `out3`/`out4` gates for tracks 1 & 2, `out5`/`out6` track CV — two voices | Yes |
 | `polyrhythmic_sequencer.py` | `out1` pitch 1 + `out2` trigger 1; `out4` pitch 2 + `out5` trigger 2; `out3`/`out6` AND/XOR — two voices | Yes |
 | `itty_bitty.py` | `cv1`-`cv3` trigger/gate/CV for sequence A, `cv4`-`cv6` for sequence B — two voices | No internal clock, but `b1`/`b2` step each sequencer by hand |
-| `consequencer.py` | `out1`-`out3` gates, `out4`-`out6` stepped CV | Yes |
+| `consequencer.py` | `out1`-`out3` gates, `out4`-`out6` stepped CV | No — internal clock selectable with a long press on `b1` |
 | `turing_machine.py` | `cv1`-`cv5` pulses (bits + logical ANDs), `cv6` register voltage | Yes |
 | `daily_random.py` | `cv1`-`cv3` gate sequences, `cv4`-`cv6` matching CV sequences | Yes |
 | `pams.py` | Any of 6 channels as gate/trigger or quantized CV, with euclidean rhythms and per-channel clock division | No — internal 1-300 BPM clock |
