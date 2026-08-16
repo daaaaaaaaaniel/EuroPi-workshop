@@ -7,7 +7,8 @@ popular gate patterns are pre-loaded. Stepped CV sequences are automatically gen
 
 Both gate patterns and CV sequences can be smoothly morphed between without disrupting playback.
 Use outputs 1 - 3 for gates and outputs 4 - 6 for randomised stepped CV patterns.
-Send a clock to the digital input to start the sequence.
+Send a clock to the digital input to start the sequence, or switch to the internal clock to run
+Consequencer standalone (see "Clock source" below).
 
 Demo video: https://youtu.be/UwjajP6uiQU
 
@@ -31,7 +32,7 @@ Normal steps are shown with a `^` character, whereas steps with a probability ar
 
 ## Inputs
 
-- digital_in: Clock in
+- digital_in: Clock in (ignored while the internal clock is selected)
 - analog_in: Mode 1: Adjusts randonmess, Mode 2: Selects gate pattern, Mode 3: Selects stepped CV
   pattern
 
@@ -44,12 +45,13 @@ Normal steps are shown with a `^` character, whereas steps with a probability ar
 
 button_1:
 - Short Press  (<300ms)  : Play previous CV Pattern
-- Medium Press (>300ms)  : Short Press: toggle randomized hi-hats on / off
-- Long Press   (>3000ms) : Toggle option to send clocks from output 4 on / off
+- Medium Press (>300ms)  : Toggle option to send clocks from output 4 on / off
+- Long Press   (>3000ms) : Toggle between the internal clock and an external clock on the digital
+  input
 button_2:
 - Short Press  (<300ms)  : Play next CV Pattern or generate a new one if needed
 - Medium Press (>300ms)  : Cycle through analogue input modes
-- Long Press   (>3000ms) : Toggle between pattern banks (original / grids)
+- Long Press   (>3000ms and <5000ms) : Toggle between pattern banks (original / grids)
 
 ## Outputs
 
@@ -60,6 +62,43 @@ button_2:
 - output_5: randomly generated stepped CV
 - output_6: randomly generated stepped CV
 
+# Clock source
+
+Consequencer can be driven either by an external clock patched into the digital input (the default)
+or by its own internal clock, which lets it run without anything patched into the digital input.
+
+Hold button 1 for longer than 3 seconds and release to switch between the two. A small filled
+rectangle is shown on the bottom left of the screen while the internal clock is running.
+
+The internal clock's tempo is set by the `INTERNAL_BPM` configuration option (see "Configuration"
+below) and is measured in quarter notes per minute. Patterns are 16 steps to the bar, so one step is
+a sixteenth note: at the default 120 BPM each step lasts 125ms.
+
+While the internal clock is selected, any signal on the digital input is ignored. Switching sources
+drops any gates that are currently high, so changing source mid-sequence cannot leave an output
+stuck on.
+
+Note that the internal clock is driven from the main program loop rather than from an interrupt, so
+its timing is not as tight as an external clock's. At high tempos you may notice a small amount of
+jitter as the display redraws.
+
+# Configuration
+
+Consequencer reads two options from `config/Consequencer.json`. See
+[configuration](/CONFIGURATION.md) for how to create and edit this file.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `RANDOM_HH` | boolean | `false` | Generate a random gate pattern on output 3 in real time, instead of playing the hi-hat pattern |
+| `INTERNAL_BPM` | integer, 1-300 | `120` | Tempo of the internal clock, in quarter notes per minute |
+
+```json
+{
+    "RANDOM_HH": false,
+    "INTERNAL_BPM": 120
+}
+```
+
 # Getting Started
 
 The following sections provide instructions for creating a simple 3 drum pattern with a kick, snare
@@ -68,19 +107,20 @@ connect outputs 1 - 3 to any module which expects gates and outputs 4 - 6 to any
 control voltage.
 
 ## Basic Usage
-1. Connect a clock input to the Digital input
+1. Connect a clock input to the Digital input, or hold button 1 for longer than 3 seconds to switch
+   to the internal clock
 2. Connect a Bass Drum to output 1, Snare to output 2 and Hi-hat to output 3
-3. Start your clock - a pattern will output gates on outputs 1 -3
+3. Start your clock - a pattern will output gates on outputs 1 -3. On the internal clock the
+   sequence starts as soon as it is selected.
 4. Select different patterns manually using knob 2 (right-hand knob). The selected pattern is shown
    visually on the screen.
 
 ## Adding randomness
-1. A medium-press (>300ms and < 3000ms) and release of button 1 toggles on/off the real-time
-   generation of a random gate pattern to output 3. A small filled rectangle is shown on the bottom
-   left of the screen when this feature is active.
-2. Knob 1 increases or decreases the randomness of the patterns sent to outputs 1 -3
-3. Randomness can also be controlled by sending CV to the analogue input if analogInputMode 1 is
+1. Knob 1 increases or decreases the randomness of the patterns sent to outputs 1 -3
+2. Randomness can also be controlled by sending CV to the analogue input if analogInputMode 1 is
    selected (default).
+3. Setting `RANDOM_HH` to `true` in the configuration file replaces the hi-hat pattern on output 3
+   with a gate pattern generated randomly in real time.
 
 ## Using random CV from outputs 4 - 6
 
@@ -198,10 +238,10 @@ incorporate Consequencer into your patch. However, there is an option for Conseq
 gates on output which are perfectly in time with the sequence being played. This allows you to clock
 other modules using output 4.
 
-To enable this feature hold down button 1 for longer than 3 seconds, then release the button. A
-small unfilled rectangle is shown on the bottom left of the screen when this feature is active. This
-visual indicator is on the right of the random hi-hat visual indicator (filled rectangle on the
-bottom left of the screen).
+To enable this feature press and hold button 1 for longer than 300ms (but less than 3 seconds), then
+release the button. A small unfilled rectangle is shown on the bottom left of the screen when this
+feature is active. This visual indicator is on the right of the internal clock visual indicator
+(filled rectangle on the bottom left of the screen).
 
 # Known bugs / Interesting features
 

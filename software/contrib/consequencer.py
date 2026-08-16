@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from europi import *
-import machine
-from time import ticks_diff, ticks_ms
+from time import ticks_add, ticks_diff, ticks_ms
 from random import randint, uniform
 from europi_script import EuroPiScript
+import configuration
 import gc
 
 """
@@ -47,6 +47,12 @@ Jan-24      reduced number of calls to update screen to improve performance for 
             changed the way the mode is displayed - replaced M1,M2,M3 with Mr,Mp,Mc for easier reading
             cleaned up some code comments
             added constants for easier code reading
+
+Aug-26      added an internal clock so the script can run without an external clock on din
+            b1 medium press now toggles output4isClock; b1 long press toggles the clock source
+            b1 presses longer than 5s no longer fall through to the medium press action
+            randomized hi-hats moved from a b1 gesture to the RANDOM_HH configuration option
+            the internal clock indicator replaces the randomized hi-hat indicator on the display
 """
 
 # Operating modes for the internal state machine
@@ -64,9 +70,28 @@ MODE_DISPLAY_CHARS = ["r", "p", "c"]
 # Wake the screen upon detecting input at ain?
 WAKE_SCREEN_ON_AIN_INPUT = False
 
+# Button press duration thresholds in ms
+LONG_PRESS_MS = 3000
+MEDIUM_PRESS_MS = 300
+
+# Patterns are 16 steps to the bar, so one step is a sixteenth note.
+# Used to convert the configured BPM into a per-step interval.
+STEPS_PER_BEAT = 4
+
 
 class Consequencer(EuroPiScript):
+
+    @classmethod
+    def config_points(cls):
+        return [
+            # Randomize the hi-hat output on cv3. Was previously a b1 gesture.
+            configuration.boolean(name="RANDOM_HH", default=False),
+            # Tempo of the internal clock, in quarter notes per minute
+            configuration.integer(name="INTERNAL_BPM", minimum=1, maximum=300, default=120),
+        ]
+
     def __init__(self):
+        super().__init__()
 
         self.loadState()
 
@@ -75,6 +100,11 @@ class Consequencer(EuroPiScript):
         # Initialize variables
         self.step = 0
         self.trigger_duration_ms = 50
+        # Internal clock scheduling. next_step_at_ms is when the next step is due,
+        # gate_off_at_ms is when the current step's gates should fall (None = no gates high)
+        self.next_step_at_ms = ticks_ms()
+        self.gate_off_at_ms = None
+        self.calculateClockTiming()
         self.clock_step = 0
         self.pattern = 0
         self.pattern_prev = 0
@@ -149,14 +179,17 @@ class Consequencer(EuroPiScript):
         # Triggered when button 1 is released
         @b1.handler_falling
         def b1Pressed():
-            if (
-                ticks_diff(ticks_ms(), b1.last_pressed()) > 3000
-                and ticks_diff(ticks_ms(), b1.last_pressed()) < 5000
-            ):
-                self.output4isClock = not self.output4isClock
+            if ticks_diff(ticks_ms(), b1.last_pressed()) > LONG_PRESS_MS:
+                # Toggle between the internal clock and an external clock on din.
+                # Drop any gates that are currently high so switching mid-step
+                # cannot strand an output.
+                self.internal_clock = not self.internal_clock
+                self.gatesOff()
+                self.gate_off_at_ms = None
+                self.next_step_at_ms = ticks_ms()
                 self.saveState()
-            elif ticks_diff(ticks_ms(), b1.last_pressed()) > 300:
-                self.random_HH = not self.random_HH
+            elif ticks_diff(ticks_ms(), b1.last_pressed()) > MEDIUM_PRESS_MS:
+                self.output4isClock = not self.output4isClock
                 self.saveState()
             else:
                 # Play previous CV Pattern, unless we are at the first pattern
@@ -169,70 +202,90 @@ class Consequencer(EuroPiScript):
         # Triggered on each clock into digital input. Output triggers.
         @din.handler
         def clockTrigger():
-
-            # function timing code. Leave in and activate as needed
-            # t = time.ticks_us()
-
-            self.step_length = len(self.BD[self.pattern])
-
-            # A pattern was selected which is shorter than the current step. Set to zero to avoid an error
-            if self.step >= self.step_length:
-                self.step = 0
-            cv5.voltage(self.random5[self.CvPattern][self.step])
-            cv6.voltage(self.random6[self.CvPattern][self.step])
-
-            # How much randomness to add to cv1-3
-            # As the randomness value gets higher, the chance of a randomly selected int being lower gets higher
-            # The output will only trigger if the randint() is <= than the probability of the step in BdProb, SnProb and HhProb respectively
-            # Random number 0-99
-            randomNumber0_99 = randint(0, 99)
-            # Random number 0-9
-            randomNumber0_9 = randomNumber0_99 // 10
-            if randomNumber0_99 < self.randomness:
-                if randomNumber0_9 <= int(self.BdProb[self.pattern][self.step]):
-                    cv1.voltage(self.gateVoltages[randint(0, 1)])
-                if randomNumber0_9 <= int(self.SnProb[self.pattern][self.step]):
-                    cv2.voltage(self.gateVoltages[randint(0, 1)])
-                if randomNumber0_9 <= int(self.HhProb[self.pattern][self.step]):
-                    cv3.voltage(self.gateVoltages[randint(0, 1)])
-            else:
-                if randomNumber0_9 <= int(self.BdProb[self.pattern][self.step]):
-                    cv1.voltage(self.gateVoltages[int(self.BD[self.pattern][self.step])])
-                if randomNumber0_9 <= int(self.SnProb[self.pattern][self.step]):
-                    cv2.voltage(self.gateVoltages[int(self.SN[self.pattern][self.step])])
-
-                # If randomize HH is ON:
-                if self.random_HH:
-                    cv3.value(randint(0, 1))
-                else:
-                    if randomNumber0_9 <= int(self.HhProb[self.pattern][self.step]):
-                        cv3.voltage(self.gateVoltages[int(self.HH[self.pattern][self.step])])
-
-            # Set cv4-6 voltage outputs based on previously generated random pattern
-            if self.output4isClock:
-                cv4.voltage(self.gateVoltage)
-            else:
-                cv4.voltage(self.random4[self.CvPattern][self.step])
-
-            # Incremenent the clock step
-            self.clock_step += 1
-            self.step += 1
-
-            # Update the UI
-            if not self.screenOff:
-                self._updateUI = True
-
-            # function timing code. Leave in and activate as needed
-            # delta = time.ticks_diff(time.ticks_us(), t)
-            # print('Function {} Time = {:6.3f}ms'.format('clockTrigger', delta/1000))
+            # Ignore the external clock while the internal clock is driving the sequence
+            if not self.internal_clock:
+                self.advanceStep()
 
         @din.handler_falling
         def clockTriggerEnd():
-            cv1.off()
-            cv2.off()
-            cv3.off()
-            if self.output4isClock:
-                cv4.off()
+            if not self.internal_clock:
+                self.gatesOff()
+
+    def calculateClockTiming(self):
+        """Recalculate the internal clock's step interval and gate length.
+
+        The gate is clamped to half a step so that gates cannot outlast their own
+        step at high tempos.
+        """
+        self.step_interval_ms = int(60000 / (self.config.INTERNAL_BPM * STEPS_PER_BEAT))
+        self.gate_ms = min(self.trigger_duration_ms, self.step_interval_ms // 2)
+
+    def advanceStep(self):
+        """Output the current step and advance the sequence by one step"""
+
+        # function timing code. Leave in and activate as needed
+        # t = time.ticks_us()
+
+        self.step_length = len(self.BD[self.pattern])
+
+        # A pattern was selected which is shorter than the current step. Set to zero to avoid an error
+        if self.step >= self.step_length:
+            self.step = 0
+        cv5.voltage(self.random5[self.CvPattern][self.step])
+        cv6.voltage(self.random6[self.CvPattern][self.step])
+
+        # How much randomness to add to cv1-3
+        # As the randomness value gets higher, the chance of a randomly selected int being lower gets higher
+        # The output will only trigger if the randint() is <= than the probability of the step in BdProb, SnProb and HhProb respectively
+        # Random number 0-99
+        randomNumber0_99 = randint(0, 99)
+        # Random number 0-9
+        randomNumber0_9 = randomNumber0_99 // 10
+        if randomNumber0_99 < self.randomness:
+            if randomNumber0_9 <= int(self.BdProb[self.pattern][self.step]):
+                cv1.voltage(self.gateVoltages[randint(0, 1)])
+            if randomNumber0_9 <= int(self.SnProb[self.pattern][self.step]):
+                cv2.voltage(self.gateVoltages[randint(0, 1)])
+            if randomNumber0_9 <= int(self.HhProb[self.pattern][self.step]):
+                cv3.voltage(self.gateVoltages[randint(0, 1)])
+        else:
+            if randomNumber0_9 <= int(self.BdProb[self.pattern][self.step]):
+                cv1.voltage(self.gateVoltages[int(self.BD[self.pattern][self.step])])
+            if randomNumber0_9 <= int(self.SnProb[self.pattern][self.step]):
+                cv2.voltage(self.gateVoltages[int(self.SN[self.pattern][self.step])])
+
+            # If randomize HH is ON:
+            if self.config.RANDOM_HH:
+                cv3.value(randint(0, 1))
+            else:
+                if randomNumber0_9 <= int(self.HhProb[self.pattern][self.step]):
+                    cv3.voltage(self.gateVoltages[int(self.HH[self.pattern][self.step])])
+
+        # Set cv4-6 voltage outputs based on previously generated random pattern
+        if self.output4isClock:
+            cv4.voltage(self.gateVoltage)
+        else:
+            cv4.voltage(self.random4[self.CvPattern][self.step])
+
+        # Incremenent the clock step
+        self.clock_step += 1
+        self.step += 1
+
+        # Update the UI
+        if not self.screenOff:
+            self._updateUI = True
+
+        # function timing code. Leave in and activate as needed
+        # delta = time.ticks_diff(time.ticks_us(), t)
+        # print('Function {} Time = {:6.3f}ms'.format('advanceStep', delta/1000))
+
+    def gatesOff(self):
+        """Drop the gate outputs at the end of a step"""
+        cv1.off()
+        cv2.off()
+        cv3.off()
+        if self.output4isClock:
+            cv4.off()
 
     def initPatterns(self):
 
@@ -287,9 +340,9 @@ class Consequencer(EuroPiScript):
     def saveState(self):
         self.state = {
             "analogInputMode": self.analogInputMode,
-            "random_HH": self.random_HH,
             "output4isClock": self.output4isClock,
             "gridsMode": self.gridsMode,
+            "internal_clock": self.internal_clock,
         }
         self.save_state_json(self.state)
 
@@ -298,9 +351,10 @@ class Consequencer(EuroPiScript):
     def loadState(self):
         self.state = self.load_state_json()
         self.analogInputMode = self.state.get("analogInputMode", 1)
-        self.random_HH = self.state.get("random_HH", False)
         self.output4isClock = self.state.get("output4isClock", False)
         self.gridsMode = self.state.get("gridsMode", False)
+        # Default to the external clock so existing users see no change in behaviour
+        self.internal_clock = self.state.get("internal_clock", False)
         self.saveState()
 
     def generateNewRandomCVPattern(self):
@@ -394,13 +448,28 @@ class Consequencer(EuroPiScript):
             self.getPattern()
             self.getRandomness()
             self.getCvPattern()
+
+            # Drive the sequence from the internal clock, if selected
+            if self.internal_clock:
+                now = ticks_ms()
+                if ticks_diff(now, self.next_step_at_ms) >= 0:
+                    self.next_step_at_ms = ticks_add(now, self.step_interval_ms)
+                    self.gate_off_at_ms = ticks_add(now, self.gate_ms)
+                    self.advanceStep()
+                elif self.gate_off_at_ms is not None and ticks_diff(now, self.gate_off_at_ms) >= 0:
+                    self.gate_off_at_ms = None
+                    self.gatesOff()
+
             # Update screen if updateUI flag has been set
             if self._updateUI:
                 self.updateScreen()
                 self._updateUI = False
             # If I have been running, then stopped for longer than reset_timeout, reset the steps and clock_step to 0
+            # Only applies to the external clock; din.last_triggered() never advances when
+            # the internal clock is running, which would otherwise reset the sequence every pass
             if (
-                self.clock_step != 0
+                not self.internal_clock
+                and self.clock_step != 0
                 and ticks_diff(ticks_ms(), din.last_triggered()) > self.reset_timeout
             ):
                 self.step = 0
@@ -469,8 +538,8 @@ class Consequencer(EuroPiScript):
             )
             normal_lpos += lpos_offset
 
-        # If the random toggle is on, show a rectangle
-        if self.random_HH:
+        # If the internal clock is driving the sequence, show a rectangle
+        if self.internal_clock:
             oled.fill_rect(0, 29, 10, 3, 1)
 
         # Show self.output4isClock indicator
