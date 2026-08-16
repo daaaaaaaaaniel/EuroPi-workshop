@@ -38,7 +38,7 @@ Normal steps are shown with a `^` character, whereas steps with a probability ar
 
 ## Knobs
 
-- knob_1: randomness
+- knob_1: randomness, or the internal clock's tempo while button 1 is held
 - knob_2: select pattern
 
 ## Buttons
@@ -48,6 +48,8 @@ button_1:
 - Medium Press (>300ms)  : Toggle option to send clocks from output 4 on / off
 - Long Press   (>3000ms) : Toggle between the internal clock and an external clock on the digital
   input
+- Hold and turn knob 1   : Adjust the internal clock's tempo. Turning knob 1 during the hold
+  cancels whichever of the actions above the press length would otherwise have triggered.
 button_2:
 - Short Press  (<300ms)  : Play next CV Pattern or generate a new one if needed
 - Medium Press (>300ms)  : Cycle through analogue input modes
@@ -70,9 +72,27 @@ or by its own internal clock, which lets it run without anything patched into th
 Hold button 1 for longer than 3 seconds and release to switch between the two. A small filled
 rectangle is shown on the bottom left of the screen while the internal clock is running.
 
-The internal clock's tempo is set by the `INTERNAL_BPM` configuration option (see "Configuration"
-below) and is measured in quarter notes per minute. Patterns are 16 steps to the bar, so one step is
-a sixteenth note: at the default 120 BPM each step lasts 125ms.
+The internal clock's tempo is measured in quarter notes per minute and can be set from 1 to 300 BPM.
+Patterns are 16 steps to the bar, so one step is a sixteenth note: at the default 120 BPM each step
+lasts 125ms.
+
+## Setting the tempo
+
+Hold button 1 and turn knob 1. The tempo is shown in place of the randomness value at the bottom of
+the screen, prefixed with `T`, and the CV pattern number is hidden while you are adjusting it.
+
+Knob 1 normally controls randomness, so it will not be sitting at the current tempo when you start.
+To avoid the tempo jumping the moment you touch it, knob 1 does not take over until you sweep it
+through the current tempo's position. Until then the displayed tempo stays put. The same protection
+applies in reverse: after setting a tempo and releasing button 1, randomness stays at its previous
+value until knob 1 is swept back through it.
+
+Turning knob 1 while button 1 is held cancels the button's own action, so setting a tempo will not
+also toggle the clock source or the output 4 clock. If you hold button 1 and release it without
+turning knob 1, the usual medium/long press actions apply as normal.
+
+The tempo is saved when you release button 1, and is restored the next time the script starts.
+`INTERNAL_BPM` in the configuration file sets the tempo used before anything has been saved.
 
 While the internal clock is selected, any signal on the digital input is ignored. Switching sources
 drops any gates that are currently high, so changing source mid-sequence cannot leave an output
@@ -90,7 +110,7 @@ Consequencer reads two options from `config/Consequencer.json`. See
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `RANDOM_HH` | boolean | `false` | Generate a random gate pattern on output 3 in real time, instead of playing the hi-hat pattern |
-| `INTERNAL_BPM` | integer, 1-300 | `120` | Tempo of the internal clock, in quarter notes per minute |
+| `INTERNAL_BPM` | integer, 1-300 | `120` | Starting tempo of the internal clock, in quarter notes per minute. Once a tempo has been set with button 1 and knob 1 the saved value is used instead |
 
 ```json
 {

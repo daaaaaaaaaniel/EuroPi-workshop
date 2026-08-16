@@ -15,6 +15,7 @@ from europi import *
 from time import ticks_add, ticks_diff, ticks_ms
 from random import randint, uniform
 from europi_script import EuroPiScript
+from experimental.knobs import KnobBank, LockableKnob
 import configuration
 import gc
 
@@ -53,6 +54,8 @@ Aug-26      added an internal clock so the script can run without an external cl
             b1 presses longer than 5s no longer fall through to the medium press action
             randomized hi-hats moved from a b1 gesture to the RANDOM_HH configuration option
             the internal clock indicator replaces the randomized hi-hat indicator on the display
+            holding b1 and turning k1 sets the internal clock's tempo; the tempo is shown in
+            place of the randomness while b1 is held, and turning k1 suppresses b1's own action
 """
 
 # Operating modes for the internal state machine
@@ -78,6 +81,10 @@ MEDIUM_PRESS_MS = 300
 # Used to convert the configured BPM into a per-step interval.
 STEPS_PER_BEAT = 4
 
+# Range of the internal clock's tempo, in quarter notes per minute
+MIN_BPM = 1
+MAX_BPM = 300
+
 
 class Consequencer(EuroPiScript):
 
@@ -86,8 +93,11 @@ class Consequencer(EuroPiScript):
         return [
             # Randomize the hi-hat output on cv3. Was previously a b1 gesture.
             configuration.boolean(name="RANDOM_HH", default=False),
-            # Tempo of the internal clock, in quarter notes per minute
-            configuration.integer(name="INTERNAL_BPM", minimum=1, maximum=300, default=120),
+            # Starting tempo of the internal clock, in quarter notes per minute.
+            # Can be adjusted at runtime by holding b1 and turning k1.
+            configuration.integer(
+                name="INTERNAL_BPM", minimum=MIN_BPM, maximum=MAX_BPM, default=120
+            ),
         ]
 
     def __init__(self):
@@ -105,6 +115,27 @@ class Consequencer(EuroPiScript):
         self.next_step_at_ms = ticks_ms()
         self.gate_off_at_ms = None
         self.calculateClockTiming()
+
+        # While b1 is held, k1 adjusts the internal clock's tempo instead of the randomness.
+        # b1_knob_moved records whether k1 was actually turned during the hold; if it was, the
+        # button's own action is suppressed on release so that setting the tempo doesn't also
+        # toggle a setting.
+        self.b1_held = False
+        self.b1_knob_moved = False
+        self.b1_k1_at_press = 0
+
+        # k1 controls randomness normally and the tempo while b1 is held. Banking the two keeps
+        # the randomness value from jumping to wherever the knob was left after setting a tempo;
+        # it stays put until k1 is swept back through it.
+        self.k1_bank = (
+            KnobBank.builder(k1)
+            .with_unlocked_knob("randomness")
+            .with_locked_knob(
+                "bpm",
+                initial_percentage_value=(self.internal_bpm - MIN_BPM) / (MAX_BPM - MIN_BPM),
+            )
+            .build()
+        )
         self.clock_step = 0
         self.pattern = 0
         self.pattern_prev = 0
@@ -176,10 +207,32 @@ class Consequencer(EuroPiScript):
             self.screenOff = False
             self.lastInteractionTimeMs = ticks_ms()
 
+        # Triggered when button 1 is pressed. Hands k1 over to the tempo control for the
+        # duration of the hold.
+        @b1.handler
+        def b1Held():
+            self.b1_held = True
+            self.b1_knob_moved = False
+            # Sample the physical knob rather than the banked one; the banked tempo knob stays
+            # locked until it is swept back to the current tempo, so it cannot tell us whether
+            # the user actually touched k1
+            self.b1_k1_at_press = k1.read_position()
+            self.k1_bank.set_current("bpm")
+            self._updateUI = True
+            self.screenOff = False
+            self.lastInteractionTimeMs = ticks_ms()
+
         # Triggered when button 1 is released
         @b1.handler_falling
         def b1Pressed():
-            if ticks_diff(ticks_ms(), b1.last_pressed()) > LONG_PRESS_MS:
+            self.k1_bank.set_current("randomness")
+            self.b1_held = False
+
+            if self.b1_knob_moved:
+                # k1 was used to set the tempo during this hold, so don't also fire the
+                # button's own action
+                self.saveState()
+            elif ticks_diff(ticks_ms(), b1.last_pressed()) > LONG_PRESS_MS:
                 # Toggle between the internal clock and an external clock on din.
                 # Drop any gates that are currently high so switching mid-step
                 # cannot strand an output.
@@ -217,7 +270,7 @@ class Consequencer(EuroPiScript):
         The gate is clamped to half a step so that gates cannot outlast their own
         step at high tempos.
         """
-        self.step_interval_ms = int(60000 / (self.config.INTERNAL_BPM * STEPS_PER_BEAT))
+        self.step_interval_ms = int(60000 / (self.internal_bpm * STEPS_PER_BEAT))
         self.gate_ms = min(self.trigger_duration_ms, self.step_interval_ms // 2)
 
     def advanceStep(self):
@@ -343,6 +396,7 @@ class Consequencer(EuroPiScript):
             "output4isClock": self.output4isClock,
             "gridsMode": self.gridsMode,
             "internal_clock": self.internal_clock,
+            "internal_bpm": self.internal_bpm,
         }
         self.save_state_json(self.state)
 
@@ -355,6 +409,11 @@ class Consequencer(EuroPiScript):
         self.gridsMode = self.state.get("gridsMode", False)
         # Default to the external clock so existing users see no change in behaviour
         self.internal_clock = self.state.get("internal_clock", False)
+        # INTERNAL_BPM provides the starting tempo; holding b1 and turning k1 overrides it.
+        # Clamp in case the saved state predates a change to the supported range.
+        self.internal_bpm = clamp(
+            self.state.get("internal_bpm", self.config.INTERNAL_BPM), MIN_BPM, MAX_BPM
+        )
         self.saveState()
 
     def generateNewRandomCVPattern(self):
@@ -428,12 +487,32 @@ class Consequencer(EuroPiScript):
 
 
     def getKnobVals(self):
-        # Read knob vals and update if > threshold
-        self.k1ValTemp = k1.read_position()
-        if abs(self.k1ValTemp - self.k1Val) > KNOB_CHANGE_TOLERANCE:
-            self.k1Val = self.k1ValTemp
+        if self.b1_held:
+            # b1 is held, so k1 is setting the internal clock's tempo. Watch the physical knob
+            # for movement so that the button's own action can be suppressed on release
+            if abs(k1.read_position() - self.b1_k1_at_press) > KNOB_CHANGE_TOLERANCE:
+                self.b1_knob_moved = True
+
+            # The tempo knob has to be read on every pass for it to unlock, but its value is
+            # only taken once it has. Until then it reports the position it was locked at,
+            # which does not survive the round trip through the knob's resolution exactly and
+            # would otherwise nudge the tempo simply by holding b1
+            bpm_knob = self.k1_bank["bpm"]
+            bpm = bpm_knob.read_position(steps=MAX_BPM - MIN_BPM + 1) + MIN_BPM
+            if bpm_knob.state == LockableKnob.STATE_UNLOCKED and bpm != self.internal_bpm:
+                self.internal_bpm = bpm
+                self.calculateClockTiming()
+                self._updateUI = True
+
             self.screenOff = False
             self.lastInteractionTimeMs = ticks_ms()
+        else:
+            # Read knob vals and update if > threshold
+            self.k1ValTemp = self.k1_bank["randomness"].read_position()
+            if abs(self.k1ValTemp - self.k1Val) > KNOB_CHANGE_TOLERANCE:
+                self.k1Val = self.k1ValTemp
+                self.screenOff = False
+                self.lastInteractionTimeMs = ticks_ms()
 
         self.k2ValTemp = k2.read_position(len(self.BD))
         if abs(self.k2ValTemp - self.k2Val) > KNOB_CHANGE_TOLERANCE:
@@ -546,11 +625,17 @@ class Consequencer(EuroPiScript):
         if self.output4isClock:
             oled.rect(12, 29, 10, 3, 1)
 
-        # Show randomness
-        oled.text("R" + str(int(self.randomness)), 26, 25, 1)
+        if self.b1_held:
+            # While b1 is held k1 sets the tempo, so show that in place of the randomness.
+            # "T300" is one character wider than "R99" and would collide with the CV pattern,
+            # which isn't relevant while setting a tempo, so that is hidden for the duration
+            oled.text("T" + str(self.internal_bpm), 26, 25, 1)
+        else:
+            # Show randomness
+            oled.text("R" + str(int(self.randomness)), 26, 25, 1)
 
-        # Show CV pattern
-        oled.text("C" + str(self.CvPattern), 56, 25, 1)
+            # Show CV pattern
+            oled.text("C" + str(self.CvPattern), 56, 25, 1)
 
         # Show the analogInputMode
         oled.text("M" + str(MODE_DISPLAY_CHARS[self.analogInputMode - 1]), 85, 25, 1)

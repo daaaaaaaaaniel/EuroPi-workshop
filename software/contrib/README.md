@@ -518,7 +518,7 @@ which call the same `advance()` method as the `din` handler.
 | Script | How to free it |
 |--------|----------------|
 | `coin_toss.py` | `b1` toggles to internal clock |
-| `consequencer.py` | Long-press `b1` (>3s) toggles to the internal clock; tempo from `INTERNAL_BPM` |
+| `consequencer.py` | Long-press `b1` (>3s) toggles to the internal clock; hold `b1` and turn `k1` for tempo |
 | `egressus_melodiam.py` | Long-press `b2` for `unClockedMode` |
 | `envelope_generator.py` | `LOOPING_MODE_LOOP` self-retriggers; the default is once |
 | `pet_rock.py` | `k1`/`k2` run internal clocks; fully anticlockwise stops them |
