@@ -62,8 +62,15 @@ Requires MicroPython 1.23 or newer for machine.USBDevice. See midi2cv.md.
 
 MIDI_CHANNEL = 0  # 0 = omni, or 1-16
 BASE_NOTE = 0  # the MIDI note that sits at 0V
-KEEP_USB_REPL = True  # keep the serial REPL alive alongside MIDI
 USB_DEVICE_NAME = "EuroPi"  # the name the host lists in its MIDI ports
+
+# Keep the serial REPL alive alongside MIDI. Worth knowing before you test on Windows:
+# HLammers/multi-midi, another MicroPython USB MIDI library for RP2, disables the REPL
+# outright, reporting that a Windows host will not recognise the MIDI ports if CDC and
+# MIDI are both enabled. Neither library emits an Interface Association Descriptor,
+# which is what a composite device normally needs. If Windows does not see the module,
+# set this to False first -- at the cost of losing Thonny and mpremote while it runs.
+KEEP_USB_REPL = True
 
 # ----------------------------------------------------------------------------------
 # MIDI
@@ -107,8 +114,10 @@ class UsbMidiTransport(MIDIInterface):
     """
 
     def __init__(self, on_event):
-        # The library defaults to a 16-byte receive buffer, which is only four MIDI
-        # events. Clock alone is 48 events a second at 120bpm, so give it more room.
+        # 64 matches the endpoint's declared wMaxPacketSize (midi.py:297). The library
+        # defaults to a 16-byte receive buffer, which is smaller than a single packet
+        # the host is entitled to send -- USB requires a bulk OUT endpoint to accept a
+        # full max-size packet. HLammers/multi-midi aligns the two the same way.
         super().__init__(rxlen=64)
         self._on_event = on_event
 

@@ -97,6 +97,26 @@ Edit the constants at the top of `midi2cv.py`, redeploy and rerun.
 | `KEEP_USB_REPL`   | `True`     | Keep the serial REPL alive alongside MIDI  |
 | `USB_DEVICE_NAME` | `"EuroPi"` | The name the host lists in its MIDI ports  |
 
+## If Windows doesn't see the module, try `KEEP_USB_REPL = False` first
+
+With `KEEP_USB_REPL` true, EuroPi presents itself as a composite device: MicroPython's
+usual CDC serial port *and* the MIDI interface. That is convenient — Thonny and mpremote
+keep working while the script runs — but it is the configuration most likely to fail on
+Windows.
+
+[multi-midi](https://github.com/HLammers/multi-midi), another MicroPython USB MIDI library
+for RP2, disables the REPL outright and gives the reason plainly: a Windows host will not
+recognise the MIDI ports if CDC and MIDI are both enabled. Its documentation treats losing
+the REPL as the accepted cost, advising you to disable USB MIDI when you need to debug.
+
+Neither that library nor the one vendored here emits an Interface Association Descriptor,
+which is what a composite device normally needs for a host to group its interfaces
+correctly — so there is good reason to expect the same behaviour from ours.
+
+Setting `KEEP_USB_REPL = False` drops the serial port and leaves MIDI alone on the bus.
+You lose Thonny and mpremote for as long as the script runs, so plan how you will get back:
+returning to the menu resets the module and brings the REPL back.
+
 ## Pitch range
 
 Pitch is 1V per octave from `BASE_NOTE`, which defaults to 0 so MIDI note 0 sits at 0V:
@@ -136,9 +156,16 @@ on the roadmap.
 EuroPi appears under `USB_DEVICE_NAME`, defaulting to `EuroPi`, with manufacturer
 `Allen Synthesis`. Hosts derive the port name from the product string and append their own
 suffix, so expect `EuroPi` or `EuroPi MIDI 1` depending on platform — the vendored library
-has no string descriptor support for individual jacks. With `KEEP_USB_REPL` true the serial
-port Thonny sees carries the same name, which is why the default names the module rather
-than the script.
+hardcodes `iJack = 0x00` with the comment "no string descriptor support yet"
+(`midi.py:261`, `:278`), so individual jacks carry no name of their own. With
+`KEEP_USB_REPL` true the serial port Thonny sees carries the same name, which is why the
+default names the module rather than the script.
+
+Naming the jacks is possible if we ever want it — [multi-midi](https://github.com/HLammers/multi-midi)
+does it by appending each port name to the device's string table and using its index as
+`iJack`, which is a small patch to the vendored file. Two caveats from that project: the
+name is not shown on a Windows host anyway, and a name shorter than two characters makes
+Windows fail to recognise the device at all.
 
 VID and PID are left as MicroPython's. USB vendor IDs are assigned by USB-IF and cost
 money. The serial number falls back to the Pico's flash unique ID, so two modules with
@@ -203,14 +230,17 @@ Phase 1 is finished when all of these pass:
 
 1. The module enumerates on a host and appears as `EuroPi`, not `Board in FS mode`
 2. With `KEEP_USB_REPL` true, the serial port still works in Thonny or mpremote
-3. Playing notes moves `cv2`, and the voltage matches the table above on a meter
-4. Pressing play in a DAW raises `cv1`; stop drops it
-5. The message counter rises with incoming MIDI
-6. Returning to the menu and launching another script leaves the host in a sane state
-7. Power-cycling with midi2cv as the last-run script re-enumerates cleanly
-8. Latency is acceptable by ear, playing a keyboard through a DAW
+3. **On Windows specifically**, the MIDI ports appear at all with `KEEP_USB_REPL` true —
+   and if they do not, that they appear with it false
+4. Playing notes moves `cv2`, and the voltage matches the table above on a meter
+5. Pressing play in a DAW raises `cv1`; stop drops it
+6. The message counter rises with incoming MIDI
+7. Returning to the menu and launching another script leaves the host in a sane state
+8. Power-cycling with midi2cv as the last-run script re-enumerates cleanly
+9. Latency is acceptable by ear, playing a keyboard through a DAW
 
-Items 6 and 7 are the ones nothing can be predicted about from source.
+Items 7 and 8 are the ones nothing can be predicted about from source. Item 3 is the one
+another project has already reported failing.
 
 # Credits
 
