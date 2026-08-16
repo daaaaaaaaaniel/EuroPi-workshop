@@ -454,3 +454,129 @@ A simple example showing how to use configuration points and the settings menu t
 <br><i>Labels: example</i>
 
 </details>
+
+---
+
+<details>
+<summary><h2>Script Capability Reference</h2></summary>
+
+The following tables classify all 54 packaged scripts by two properties: whether they need an
+external signal on `din` to run, and whether they can drive a synth voice on their own. Derived
+by reading each script's source; `menu.py` is excluded as it is the launcher rather than a script.
+
+## Clock, gate & trigger requirements
+
+### Requires a signal on `din` — no internal clock
+
+Nothing free-runs in these scripts; each `din` edge is what advances the sequence or takes the
+next sample.
+
+| Script | Role of `din` |
+|--------|---------------|
+| `arp.py` | Trigger advances the arpeggio to the next note |
+| `bernoulli_gates.py` | The trigger/clock routed by the coin toss |
+| `binary_counter.py` | Each gate increments the 6-bit counter |
+| `bit_garden.py` | Trigger/gate source that the outputs mirror |
+| `clock_mod.py` | The clock being multiplied/divided |
+| `consequencer.py` | Clock starts and advances the sequence |
+| `cvecorder.py` | 50% duty-cycle gate; drives recording and the 32-step loop |
+| `daily_random.py` | External clock; all other controls are unused |
+| `dfam.py` | External clock, passed through `cv1` to the DFAM's ADV/CLOCK |
+| `dscn2.py` \* | Each clock walks the binary tree one step |
+| `euclid.py` \* | External clock advancing all six patterns |
+| `hamlet.py` | Clock starts and advances the sequence |
+| `itty_bitty.py` \* | Clock/gate/trigger advancing both sequences |
+| `morse.py` | Clock/gate stepping through the Morse pattern |
+| `piconacci.py` | The clock being divided by Fibonacci numbers |
+| `polyrhythmic_sequencer.py` | Clock in; the script does not play without it |
+| `probapoly.py` | 50% duty-cycle gate/clock driving the polyrhythm |
+| `sigma.py` | Triggers sampling; its pulse width also sets output gate length |
+| `smooth_random_voltages.py` | Trigger sets a new target voltage |
+| `turing_machine.py` | Clock; the shift register only steps on a `din` edge |
+
+\* Playable by hand as well as by clock. `euclid.py` and `dscn2.py` map `b1` as a manual clock for
+all channels; `itty_bitty.py` gives each of its two sequencers its own button (`b1` and `b2`),
+which call the same `advance()` method as the `din` handler.
+
+### Requires an external gate or trigger, but not a periodic clock
+
+| Script | Why |
+|--------|-----|
+| `gates_and_triggers.py` | Converts an input gate/trigger; `b1` is a manual equivalent |
+| `logic.py` | `din` and `ain` are the two logic operands |
+| `noddy_holder.py` | Needs a gate on `din` for sample/track-and-hold |
+| `sequential_switch.py` | Needs a trigger to advance; `b1` shares the `on_trigger` handler |
+| `traffic.py` | Triggers on `din` *and* `ain`; `b1`/`b2` are channel selectors, not manual triggers |
+
+### Self-sufficient — no external clock, gate or trigger required
+
+**Fully self-running (generate their own timing):** `bezier.py`, `bouncing_pixels.py`,
+`conway.py`, `gate_phaser.py`, `harmonic_lfos.py`, `lutra.py`, `master_clock.py`,
+`ocean_surge.py`, `pams.py`, `particle_physics.py`, `poly_square.py`, `strange_attractor.py`
+
+**Self-running only in a non-default mode:**
+
+| Script | How to free it |
+|--------|----------------|
+| `coin_toss.py` | `b1` toggles to internal clock |
+| `egressus_melodiam.py` | Long-press `b2` for `unClockedMode` |
+| `envelope_generator.py` | `LOOPING_MODE_LOOP` self-retriggers; the default is once |
+| `pet_rock.py` | `k1`/`k2` run internal clocks; fully anticlockwise stops them |
+| `quantizer.py` | `MODE_CONTINUOUS` ignores `din`; the default is triggered |
+
+**No timing needed at all** (static, knob, CV or network driven): `http_control.py`,
+`kompari.py`, `osc_control.py`, `radio_scanner.py`, `scope.py`, `set_timer.py`, `slopes.py`,
+`volts.py`
+
+**Examples/demos:** `custom_font_demo.py`, `hello_world.py`, `knob_playground.py`,
+`settings_menu_example.py`
+
+Note that `kompari.py`, `poly_square.py`, `quantizer.py` and `slopes.py` need no clock but are
+inert without a CV signal on `ain`.
+
+## Driving a synth voice
+
+Scripts that place gates/triggers on some outputs and CV on others simultaneously, so that one
+module can supply both the gate and the pitch/timbre CV for a voice.
+
+### Purpose-built voice sequencers
+
+| Script | Outputs | Needs external signal? |
+|--------|---------|------------------------|
+| `hamlet.py` | `out1`/`out2` triggers, `out3`/`out4` gates for tracks 1 & 2, `out5`/`out6` track CV — two voices | Yes |
+| `polyrhythmic_sequencer.py` | `out1` pitch 1 + `out2` trigger 1; `out4` pitch 2 + `out5` trigger 2; `out3`/`out6` AND/XOR — two voices | Yes |
+| `itty_bitty.py` | `cv1`-`cv3` trigger/gate/CV for sequence A, `cv4`-`cv6` for sequence B — two voices | No internal clock, but `b1`/`b2` step each sequencer by hand |
+| `consequencer.py` | `out1`-`out3` gates, `out4`-`out6` stepped CV | Yes |
+| `turing_machine.py` | `cv1`-`cv5` pulses (bits + logical ANDs), `cv6` register voltage | Yes |
+| `daily_random.py` | `cv1`-`cv3` gate sequences, `cv4`-`cv6` matching CV sequences | Yes |
+| `pams.py` | Any of 6 channels as gate/trigger or quantized CV, with euclidean rhythms and per-channel clock division | No — internal 1-300 BPM clock |
+
+### Gate + CV, where the CV is modulation rather than pitch
+
+| Script | Outputs | Needs external signal? |
+|--------|---------|------------------------|
+| `sigma.py` | `cv1`-`cv3` gates, `cv4`-`cv6` Gaussian CV (optionally quantized) | Yes |
+| `strange_attractor.py` | `out1`-`out3` attractor x/y/z CV, `out4`-`out6` triggers/gates | No |
+| `ocean_surge.py` | `cv1`-`cv3` + `cv6` buoy-height CV, `cv4`/`cv5` comparison gates | No |
+| `particle_physics.py` | `cv1`-`cv3` triggers/gates, `cv4`/`cv5` height and velocity CV | No |
+| `conway.py` | `cv1`-`cv3` entropy/ratio CV, `cv4`-`cv6` gates | No |
+| `traffic.py` | `cv1`-`cv5` channel and difference CV, `cv6` a 10ms gate per input trigger | Yes |
+
+### Processors — gate + CV out, but they need a signal in
+
+| Script | Outputs | Needs external signal? |
+|--------|---------|------------------------|
+| `quantizer.py` | `cv1` quantized pitch, `cv2`-`cv5` fixed-semitone harmonies, `cv6` note-change trigger | Continuous mode: CV on `ain` only. Triggered mode: also a trigger on `din` |
+| `slopes.py` | `cv1`/`cv2`/`cv3` rising/falling/flat gates, `cv4`-`cv6` slope-magnitude CV | CV on `ain`; no clock |
+| `noddy_holder.py` | `out1` gate copy, `out2`/`out3` S&H and T&H CV, `out4`-`out6` inverted-gate equivalents | Gate on `din`, CV on `ain` |
+| `kompari.py` | `cv1`-`cv5` comparator gates plus an analogue output | CV on `ain`; no clock |
+
+### Not usable alone
+
+`arp.py` outputs quantized pitch on all six jacks but no gate. `egressus_melodiam.py` and
+`cvecorder.py` are CV-only. `bernoulli_gates.py`, `binary_counter.py`, `bit_garden.py`,
+`coin_toss.py`, `dscn2.py`, `euclid.py`, `gate_phaser.py`, `master_clock.py`, `morse.py`,
+`pet_rock.py` and `probapoly.py` are gate/trigger-only. `poly_square.py` outputs audio directly
+rather than gate and CV.
+
+</details>
