@@ -10,6 +10,8 @@ been left out. There is no output routing, no velocity, no CC, no aftertouch, no
 division and no gate retrigger logic. Those arrive in phase 2 — see the roadmap at the
 bottom.
 
+**Labels:** MIDI, CV Generation, Controller
+
 ## Requirements
 
 - **MicroPython 1.23 or newer.** The script uses `machine.USBDevice`, which does not exist
